@@ -15,7 +15,10 @@ COMMON_ARGS=(
   --input_bin "${TRAIN_BIN}"
   --input_val_bin "${VAL_BIN}"
   --num_iterations 1000
-  --compile
+  --compile=1
+  --tensorcores=1
+  --dtype=bfloat16
+  --flash=1
   --wandb
 )
 
