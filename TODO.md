@@ -6,11 +6,11 @@
 - [x] Add `d6` config (6L/6H/384d).
 - [x] Add CLI flags for norm variant (layernorm/rms) and parameterization (standard/exp).
 - [x] Add `ExpLayerNorm` and `ExpRMSNorm` with gamma = exp(theta).
-- [ ] Add optimizer choices (AdamW/SGD) with matching hyperparams.
 - [ ] Log metrics: gamma/theta distributions, grad norms, update-to-data ratio, and loss curves.
 - [ ] Add wandb and logging.
 - [ ] Add a run script.
 
 Follow up:
+- [ ] Compare across optimizers (AdamW/SGD).
 - [ ] Experiment with weight decay (theta -> 0).
 - [ ] Add `SignedExpLayerNorm` with gamma = theta * exp(|theta| - 1).

@@ -31,6 +31,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
 from torch.distributed.optim import ZeroRedundancyOptimizer
 import torch.distributed as dist
+import wandb
 
 # -----------------------------------------------------------------------------
 # PyTorch nn.Module definitions for norm variants
@@ -429,6 +430,7 @@ if __name__ == "__main__":
                         help="normalization type: layernorm|rmsnorm")
     parser.add_argument("--norm_param", type=str, default="standard", choices=["standard", "exp"],
                         help="parameterization: standard|exp")
+    parser.add_argument("--wandb", type=int, default=0, help="enable Weights & Biases logging")
     # token layout for each step of the optimization
     parser.add_argument("--batch_size", type=int, default=4, help="batch size, in units of #batch dimensions")
     parser.add_argument("--sequence_length", type=int, default=64, help="sequence length")
@@ -464,6 +466,11 @@ if __name__ == "__main__":
     assert args.dtype in {"float32", "float16", "bfloat16"}
     assert args.model in {"d6", "d12", "d24", "d36", "d48"}
 
+    enc = None
+    if args.sample_every > 0 and int(os.environ.get("RANK", 0)) == 0:
+        import tiktoken
+        enc = tiktoken.get_encoding("gpt2")
+
     # set up DDP (distributed data parallel). torchrun sets this env variable
     ddp = int(os.environ.get('RANK', -1)) != -1 # is this a ddp run?
     if ddp:
@@ -498,6 +505,9 @@ if __name__ == "__main__":
                 device = "mps"
     print(f"using device: {device}")
     device_type = 'cuda' if 'cuda' in device else 'cpu'
+
+    if args.wandb and master_process:
+        wandb.init(project="exp-gamma", config=vars(args))
 
     # calculate gradient accumulation from the desired total batch size and the current run configuration
     tokens_per_fwdbwd = B * T * ddp_world_size
@@ -562,6 +572,9 @@ if __name__ == "__main__":
         model = DDP(model, device_ids=[ddp_local_rank])
     raw_model = model.module if ddp else model # always contains the "raw" unwrapped model
 
+    if args.wandb and master_process:
+        wandb.watch(raw_model, log="all", log_freq=100)
+
     # init the optimizer
     optimizer = raw_model.configure_optimizers(weight_decay=args.weight_decay,
                                                learning_rate=args.learning_rate, betas=(0.9, 0.95),
@@ -618,6 +631,8 @@ if __name__ == "__main__":
             if master_process and logfile is not None:
                 with open(logfile, "a") as f:
                     f.write("s:%d tel:%f\n" % (step, val_loss))
+            if args.wandb and master_process:
+                wandb.log({"val/loss": val_loss}, step=step)
 
         # once in a while perform model inference on the master process
         if (args.sample_every > 0 \
@@ -699,6 +714,17 @@ if __name__ == "__main__":
         if master_process and logfile is not None:
             with open(logfile, "a") as f:
                 f.write("s:%d trl:%f\n" % (step, lossf))
+        if args.wandb and master_process:
+            wandb.log(
+                {
+                    "train/loss": lossf,
+                    "train/grad_norm": norm,
+                    "train/lr": lr,
+                    "train/iter_ms": (t1 - t0) * 1000.0,
+                    "train/tokens_per_sec": tokens_per_second,
+                },
+                step=step,
+            )
 
         # keep track of smooth timings, last 20 iterations
         if step > 0 and step > args.num_iterations - 20:
@@ -708,6 +734,8 @@ if __name__ == "__main__":
     timings = timings[-20:]
     print0(f"final {len(timings)} iters avg: {np.mean(timings)*1000:.3f}ms")
     print0(f"peak memory consumption: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB")
+
+    wandb.finish()
 
     # -------------------------------------------------------------------------
     # clean up nice
