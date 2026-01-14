@@ -430,7 +430,7 @@ if __name__ == "__main__":
                         help="normalization type: layernorm|rmsnorm")
     parser.add_argument("--norm_param", type=str, default="standard", choices=["standard", "exp"],
                         help="parameterization: standard|exp")
-    parser.add_argument("--wandb", type=int, default=0, help="enable Weights & Biases logging")
+    parser.add_argument("--wandb", action="store_true", help="enable Weights & Biases logging")
     # token layout for each step of the optimization
     parser.add_argument("--batch_size", type=int, default=4, help="batch size, in units of #batch dimensions")
     parser.add_argument("--sequence_length", type=int, default=64, help="sequence length")
