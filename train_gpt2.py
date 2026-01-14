@@ -507,7 +507,8 @@ if __name__ == "__main__":
     device_type = 'cuda' if 'cuda' in device else 'cpu'
 
     if args.wandb and master_process:
-        wandb.init(project="exp-gamma", config=vars(args))
+        run_name = f"{args.model}-{args.norm_type}-{args.norm_param}"
+        wandb.init(project="exp-gamma", config=vars(args), name=run_name)
 
     # calculate gradient accumulation from the desired total batch size and the current run configuration
     tokens_per_fwdbwd = B * T * ddp_world_size

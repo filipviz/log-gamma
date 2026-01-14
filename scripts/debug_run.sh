@@ -11,10 +11,11 @@ NORM_TYPES=(layernorm rmsnorm)
 NORM_PARAMS=(standard exp)
 
 COMMON_ARGS=(
-  # --overfit_single_batch 0
+  --overfit_single_batch 0
   --input_bin "${TRAIN_BIN}"
   --input_val_bin "${VAL_BIN}"
   --num_iterations 1000
+  --compile
   --wandb
 )
 
