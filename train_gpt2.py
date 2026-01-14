@@ -33,6 +33,82 @@ from torch.distributed.optim import ZeroRedundancyOptimizer
 import torch.distributed as dist
 
 # -----------------------------------------------------------------------------
+# PyTorch nn.Module definitions for norm variants
+
+class ExpLayerNorm(nn.Module):
+    def __init__(
+        self,
+        normalized_shape: int | tuple[int, ...],
+        eps: float = 1e-5,
+        bias: bool = True,
+        device=None,
+        dtype=None,
+    ) -> None:
+        super().__init__()
+
+        if isinstance(normalized_shape, int):
+            normalized_shape = (normalized_shape,)
+        self.normalized_shape = normalized_shape
+        self.eps = eps
+        factory_kwargs = {"device": device, "dtype": dtype}
+
+        self.theta = nn.Parameter(torch.empty(self.normalized_shape, **factory_kwargs))
+        if bias:
+            self.bias = nn.Parameter(torch.empty(self.normalized_shape, **factory_kwargs))
+        else:
+            self.register_parameter("bias", None)
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.zeros_(self.theta)
+        if self.bias is not None:
+            nn.init.zeros_(self.bias)
+
+    def forward(self, input):
+        gamma = self.theta.exp()
+        return F.layer_norm(input, self.normalized_shape, gamma, self.bias, self.eps)
+
+class ExpRMSNorm(nn.Module):
+    def __init__(
+        self,
+        normalized_shape: int | tuple[int, ...],
+        eps: float | None = None,
+        device=None,
+        dtype=None,
+    ) -> None:
+        super().__init__()
+
+        if isinstance(normalized_shape, int):
+            normalized_shape = (normalized_shape,)
+        self.normalized_shape = normalized_shape
+        self.eps = eps
+        factory_kwargs = {"device": device, "dtype": dtype}
+
+        self.theta = nn.Parameter(torch.empty(normalized_shape, **factory_kwargs))
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        nn.init.zeros_(self.theta)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        gamma = self.theta.exp()
+        return F.rms_norm(x, self.normalized_shape, gamma, self.eps)
+
+def make_norm(config):
+    if config.norm_type == "layernorm":
+        if config.norm_param == "standard":
+            return nn.LayerNorm(config.n_embd, eps=1e-5, elementwise_affine=True)
+        if config.norm_param == "exp":
+            return ExpLayerNorm(config.n_embd, eps=1e-5, bias=True)
+    elif config.norm_type == "rmsnorm":
+        if config.norm_param == "standard":
+            return nn.RMSNorm(config.n_embd, eps=1e-5, elementwise_affine=True)
+        if config.norm_param == "exp":
+            return ExpRMSNorm(config.n_embd, eps=1e-5)
+    raise ValueError(f"unsupported norm config: {config.norm_type}/{config.norm_param}")
+
+# -----------------------------------------------------------------------------
 # PyTorch nn.Module definitions for the GPT-2 model
 
 class NewGELU(nn.Module):
@@ -102,14 +178,14 @@ class Block(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        self.ln_1 = nn.LayerNorm(config.n_embd)
+        self.norm_1 = make_norm(config)
         self.attn = CausalSelfAttention(config)
-        self.ln_2 = nn.LayerNorm(config.n_embd)
+        self.norm_2 = make_norm(config)
         self.mlp = MLP(config)
 
     def forward(self, x):
-        x = x + self.attn(self.ln_1(x))
-        x = x + self.mlp(self.ln_2(x))
+        x = x + self.attn(self.norm_1(x))
+        x = x + self.mlp(self.norm_2(x))
         return x
 
 # -----------------------------------------------------------------------------
@@ -122,6 +198,8 @@ class GPTConfig:
     n_layer: int = 12
     n_head: int = 12
     n_embd: int = 768
+    norm_type: str = "layernorm"
+    norm_param: str = "standard"
 
 class GPT(nn.Module):
 
@@ -133,7 +211,7 @@ class GPT(nn.Module):
             wte = nn.Embedding(config.vocab_size, config.n_embd),
             wpe = nn.Embedding(config.block_size, config.n_embd),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
-            ln_f = nn.LayerNorm(config.n_embd),
+            norm_f = make_norm(config),
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.lm_head.LLMC_SKIP_INIT = 1 # don't init this one, we will tie weights
@@ -170,7 +248,7 @@ class GPT(nn.Module):
 
         for block in self.transformer.h:
             x = block(x)
-        x = self.transformer.ln_f(x)
+        x = self.transformer.norm_f(x)
 
         if targets is not None:
             # if we are given some desired targets also calculate the loss
@@ -186,55 +264,6 @@ class GPT(nn.Module):
             logits = None
 
         return logits, loss
-
-    @classmethod
-    def from_pretrained(cls, model_type):
-        """Loads pretrained GPT-2 model weights from huggingface"""
-        assert model_type in {'gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl'}
-        from transformers import GPT2LMHeadModel
-        print("loading weights from pretrained gpt: %s" % model_type)
-
-        # n_layer, n_head and n_embd are determined from model_type
-        config_args = {
-            'gpt2':         dict(n_layer=12, n_head=12, n_embd=768),  # 124M params
-            'gpt2-medium':  dict(n_layer=24, n_head=16, n_embd=1024), # 350M params
-            'gpt2-large':   dict(n_layer=36, n_head=20, n_embd=1280), # 774M params
-            'gpt2-xl':      dict(n_layer=48, n_head=25, n_embd=1600), # 1558M params
-        }[model_type]
-        config_args['vocab_size'] = 50257 # always 50257 for GPT model checkpoints
-        config_args['block_size'] = 1024 # always 1024 for GPT model checkpoints
-        # create a from-scratch initialized minGPT model
-        config = GPTConfig(**config_args)
-        model = GPT(config)
-        sd = model.state_dict()
-        sd_keys = sd.keys()
-        sd_keys = [k for k in sd_keys if not k.endswith('.attn.bias')] # discard this mask / buffer, not a param
-
-        # init a huggingface/transformers model
-        model_hf = GPT2LMHeadModel.from_pretrained(model_type)
-        sd_hf = model_hf.state_dict()
-
-        # copy while ensuring all of the parameters are aligned and match in names and shapes
-        sd_keys_hf = sd_hf.keys()
-        sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.masked_bias')] # ignore these, just a buffer
-        sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.bias')] # same, just the mask (buffer)
-        transposed = ['attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight']
-        # basically the openai checkpoints use a "Conv1D" module, but we only want to use a vanilla Linear
-        # this means that we have to transpose these weights when we import them
-        assert len(sd_keys_hf) == len(sd_keys), f"mismatched keys: {len(sd_keys_hf)} != {len(sd_keys)}"
-        for k in sd_keys_hf:
-            if any(k.endswith(w) for w in transposed):
-                # special treatment for the Conv1D weights we need to transpose
-                assert sd_hf[k].shape[::-1] == sd[k].shape
-                with torch.no_grad():
-                    sd[k].copy_(sd_hf[k].t())
-            else:
-                # vanilla copy over the other parameters
-                assert sd_hf[k].shape == sd[k].shape
-                with torch.no_grad():
-                    sd[k].copy_(sd_hf[k])
-
-        return model
 
     def configure_optimizers(self, weight_decay, learning_rate, betas, device_type, zero_stage):
         # start with all of the candidate parameters
@@ -395,7 +424,11 @@ if __name__ == "__main__":
     parser.add_argument("--input_bin", type=str, default="data/tinyshakespeare/tiny_shakespeare_val.bin", help="input .bin to train on")
     parser.add_argument("--input_val_bin", type=str, default="", help="input .bin to eval validation loss on")
     parser.add_argument("--output_dir", type=str, default="", help="output directory to which to write logs and checkpoints")
-    parser.add_argument("--model", type=str, default="gpt2", help="gpt2|gpt2-medium|gpt2-large|gpt2-xl|d12|d24|d36|d48")
+    parser.add_argument("--model", type=str, default="d6", help="d6|d12|d24|d36|d48")
+    parser.add_argument("--norm_type", type=str, default="layernorm", choices=["layernorm", "rmsnorm"],
+                        help="normalization type: layernorm|rmsnorm")
+    parser.add_argument("--norm_param", type=str, default="standard", choices=["standard", "exp"],
+                        help="parameterization: standard|exp")
     # token layout for each step of the optimization
     parser.add_argument("--batch_size", type=int, default=4, help="batch size, in units of #batch dimensions")
     parser.add_argument("--sequence_length", type=int, default=64, help="sequence length")
@@ -429,7 +462,7 @@ if __name__ == "__main__":
     B, T = args.batch_size, args.sequence_length
     assert 1 <= T <= 1024
     assert args.dtype in {"float32", "float16", "bfloat16"}
-    assert args.model in {"gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl", "d12", "d24", "d36", "d48"}
+    assert args.model in {"d6", "d12", "d24", "d36", "d48"}
 
     # set up DDP (distributed data parallel). torchrun sets this env variable
     ddp = int(os.environ.get('RANK', -1)) != -1 # is this a ddp run?
@@ -491,19 +524,20 @@ if __name__ == "__main__":
     assert args.flash in {0, 1}
     FLASH = args.flash
 
-    # init the model, either from scratch or from OpenAI pretrained checkpoint
-    if args.model[0] == "d":
-        # from scratch (random weights)
-        model_config = {
-            "d12": GPTConfig(block_size=1024, vocab_size=50257, n_layer=12, n_head=12, n_embd=768),
-            "d24": GPTConfig(block_size=1024, vocab_size=50257, n_layer=24, n_head=16, n_embd=1024),
-            "d36": GPTConfig(block_size=1024, vocab_size=50257, n_layer=36, n_head=20, n_embd=1280),
-            "d48": GPTConfig(block_size=1024, vocab_size=50257, n_layer=48, n_head=25, n_embd=1600),
-        }[args.model]
-        model = GPT(model_config)
-    else:
-        # load the GPT-2 model weights
-        model = GPT.from_pretrained(args.model)
+    # init the model from scratch (random weights)
+    model_config = {
+        "d6": GPTConfig(block_size=1024, vocab_size=50257, n_layer=6, n_head=6, n_embd=384,
+                        norm_type=args.norm_type, norm_param=args.norm_param),
+        "d12": GPTConfig(block_size=1024, vocab_size=50257, n_layer=12, n_head=12, n_embd=768,
+                         norm_type=args.norm_type, norm_param=args.norm_param),
+        "d24": GPTConfig(block_size=1024, vocab_size=50257, n_layer=24, n_head=16, n_embd=1024,
+                         norm_type=args.norm_type, norm_param=args.norm_param),
+        "d36": GPTConfig(block_size=1024, vocab_size=50257, n_layer=36, n_head=20, n_embd=1280,
+                         norm_type=args.norm_type, norm_param=args.norm_param),
+        "d48": GPTConfig(block_size=1024, vocab_size=50257, n_layer=48, n_head=25, n_embd=1600,
+                         norm_type=args.norm_type, norm_param=args.norm_param),
+    }[args.model]
+    model = GPT(model_config)
     model.train()
     model.to(device)
     if args.compile:
