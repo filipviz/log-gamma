@@ -19,6 +19,7 @@ COMMON_ARGS=(
   --tensorcores=1
   --dtype=bfloat16
   --flash=1
+  --wandb_project "log-gamma-debug"
   --wandb
 )
 

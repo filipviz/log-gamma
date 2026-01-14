@@ -431,6 +431,7 @@ if __name__ == "__main__":
     parser.add_argument("--norm_param", type=str, default="standard", choices=["standard", "exp"],
                         help="parameterization: standard|exp")
     parser.add_argument("--wandb", action="store_true", help="enable Weights & Biases logging")
+    parser.add_argument("--wandb_project", type=str, default="log-gamma", help="Weights & Biases project name")
     # token layout for each step of the optimization
     parser.add_argument("--batch_size", type=int, default=4, help="batch size, in units of #batch dimensions")
     parser.add_argument("--sequence_length", type=int, default=64, help="sequence length")
@@ -508,7 +509,7 @@ if __name__ == "__main__":
 
     if args.wandb and master_process:
         run_name = f"{args.model}-{args.norm_type}-{args.norm_param}"
-        wandb.init(project="exp-gamma", config=vars(args), name=run_name)
+        wandb.init(project=args.wandb_project, config=vars(args), name=run_name)
 
     # calculate gradient accumulation from the desired total batch size and the current run configuration
     tokens_per_fwdbwd = B * T * ddp_world_size

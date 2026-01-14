@@ -35,6 +35,7 @@ COMMON_ARGS=(
   --flash=1
   --tensorcores=1
   --dtype=bfloat16
+  --wandb_project "log-gamma-full"
   --wandb
 )
 
