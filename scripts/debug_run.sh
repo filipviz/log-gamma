@@ -11,6 +11,7 @@ NORM_TYPES=(layernorm rmsnorm)
 NORM_PARAMS=(standard exp)
 
 COMMON_ARGS=(
+  # --overfit_single_batch 0
   --input_bin "${TRAIN_BIN}"
   --input_val_bin "${VAL_BIN}"
   --num_iterations 1000
@@ -20,7 +21,7 @@ COMMON_ARGS=(
 for norm_type in "${NORM_TYPES[@]}"; do
   for norm_param in "${NORM_PARAMS[@]}"; do
     echo "=== Running d6 | ${norm_type}/${norm_param} ==="
-    python train_gpt2.py \
+    python3 train_gpt2.py \
       --norm_type "${norm_type}" \
       --norm_param "${norm_param}" \
       "${COMMON_ARGS[@]}"
