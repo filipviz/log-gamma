@@ -7,14 +7,14 @@ The output is written to a newly created tinyshakespeare/ folder.
 The script prints:
 
 For GPT-2:
-$ python dev/data/tinyshakespeare.py --model=gpt-2
-writing 32,768 tokens to /home/ubuntu/llm.c/dev/data/tinyshakespeare/tiny_shakespeare_val.bin (66,560 bytes) in the gpt-2 format
-writing 305,260 tokens to /home/ubuntu/llm.c/dev/data/tinyshakespeare/tiny_shakespeare_train.bin (611,544 bytes) in the gpt-2 format
+$ python data/tinyshakespeare.py --model=gpt-2
+writing 32,768 tokens to data/tinyshakespeare/tiny_shakespeare_val.bin (66,560 bytes) in the gpt-2 format
+writing 305,260 tokens to data/tinyshakespeare/tiny_shakespeare_train.bin (611,544 bytes) in the gpt-2 format
 
 For LLaMA 3:
-$ python dev/data/tinyshakespeare.py --model=llama-3
-writing 32,768 tokens to /home/ubuntu/llm.c/dev/data/tinyshakespeare/tiny_shakespeare_val.bin (132,096 bytes) in the llama-3 format
-writing 276,224 tokens to /home/ubuntu/llm.c/dev/data/tinyshakespeare/tiny_shakespeare_train.bin (1,105,920 bytes) in the llama-3 format
+$ python data/tinyshakespeare.py --model=llama-3
+writing 32,768 tokens to data/tinyshakespeare/tiny_shakespeare_val.bin (132,096 bytes) in the llama-3 format
+writing 276,224 tokens to data/tinyshakespeare/tiny_shakespeare_train.bin (1,105,920 bytes) in the llama-3 format
 
 And runs in a few seconds depending on your internet
 connection and computer. The .bin files are raw byte

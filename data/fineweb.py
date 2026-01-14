@@ -16,7 +16,7 @@ example doc to highlight the structure of the dataset:
 }
 
 Example of downloading the 100B dataset of FineWebEDU, from root directory:
-python dev/data/fineweb.py -t edu -v 100B
+python data/fineweb.py -t edu -v 100B
 100B runs for small few hours, depending on your internet and computer.
 """
 import os
